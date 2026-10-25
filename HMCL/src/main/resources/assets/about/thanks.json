@@ -83,12 +83,6 @@
     },
     "titleLocalized" : "about.thanks_to.contributors",
     "subtitleLocalized" : "about.thanks_to.contributors.statement",
-    "externalLink" : "https://github.com/HMCL-dev/HMCL/graphs/contributors"
-  },
-  {
-    "image" : "/assets/img/icon.png",
-    "titleLocalized" : "about.thanks_to.users",
-    "subtitleLocalized" : "about.thanks_to.users.statement",
-    "externalLink" : "https://docs.hmcl.net/groups.html"
+    "externalLink" : "https://github.com/misuOVO/KilnLauncher/graphs/contributors"
   }
 ]
