@@ -40,7 +40,7 @@ instance's `mods` folder.
 The mod / resource pack / shader pages can search **Modrinth**, **CurseForge**, or **both
 merged**. Merged mode queries both sites and removes duplicates by name.
 
-> CurseForge requires your own API key (free at `console.curseforge.com`). Enter it under
+> CurseForge requires your own API key. Enter it under
 > "Settings → Download → CurseForge API Key", or bake it into a build with the
 > `CURSEFORGE_API_KEY` environment variable.
 

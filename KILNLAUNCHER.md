@@ -222,7 +222,7 @@ KilnLauncher 改成：
 - 「设置 → 下载」新增 **CurseForge API Key**，填进去立刻生效，不用重启；
 - Key 配好之后，下拉框里会多出「合并」。
 
-Key 可以在 `console.curseforge.com` 免费申请。合并模式按「slug + 名称」去重，
+合并模式按「slug + 名称」去重，
 避免同一个模组出现两次；因为两个站的分类 id 不通用，选了分类时只查 Modrinth。
 
 ## 构建与运行

@@ -226,7 +226,7 @@ hidden entirely. KilnLauncher instead:
 - adds a **CurseForge API Key** row under "Settings → Download" that takes effect immediately;
 - shows "Merged" in the selector once a key is configured.
 
-Keys can be obtained for free at `console.curseforge.com`. Merged mode deduplicates by
+Merged mode deduplicates by
 "slug + title"; because category ids differ between the sites, a selected category searches
 Modrinth only.
 

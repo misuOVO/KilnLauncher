@@ -34,7 +34,7 @@ KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/H
 模组 / 资源包 / 光影页面支持选择 **Modrinth**、**CurseForge** 或**合并搜索**。
 合并模式会同时查询两个站点并按名称去重。
 
-> CurseForge 需要自己的 API Key（在 `console.curseforge.com` 免费申请），
+> CurseForge 需要自己的 API Key，
 > 在「设置 → 下载 → CurseForge API Key」填入即可，也可以构建时通过环境变量
 > `CURSEFORGE_API_KEY` 内置。
 
