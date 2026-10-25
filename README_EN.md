@@ -20,7 +20,7 @@ Current version: **1.0.0**
 - Lobby filtering by tag and free-text search by room name or host name.
   Host names are only matched for Microsoft accounts, because offline accounts can use any name.
 - Each row shows the host's measured latency and `Ping Xs ago`; a room is only marked as
-  possibly offline after three missed heartbeats (3 minutes).
+  possibly offline after three missed Pings (3 minutes).
 - Optional custom room name; falls back to the game instance name.
 
 ### Room password

@@ -31,17 +31,17 @@ executable's file version and the window title.
 Create a room under "Multiplayer" → "Status"; once it is started, a
 **"Publish to room lobby"** switch appears:
 
-- On: publishes the invite code immediately and sends a heartbeat every 60 seconds.
+- On: publishes the invite code immediately and sends a Ping every 60 seconds.
 - Off: removes the room immediately.
 - Leaving the room, switching to guest mode or a Terracotta failure removes it as well.
-- If the launcher crashes, the room disappears automatically after **4 minutes** (heartbeat
+- If the launcher crashes, the room disappears automatically after **4 minutes** (Ping
   timeout).
 
 > The invite code of a public room is visible to everyone, and anyone holding it can join.
 > Do not reveal private information in a public room.
 
 Privacy: publishing sends the room name, host name, player count, instance name and invite
-code to a public topic. After turning it off (or after the heartbeat expires) the lobby stops
+code to a public topic. After turning it off (or after the Ping expires) the lobby stops
 showing the room within 4 minutes, but messages already published to ntfy.sh cannot be
 recalled and may remain in the server cache for up to 12 hours.
 
@@ -50,12 +50,12 @@ recalled and may remain in the server cache for up to 12 hours.
 The lobby uses a **public topic** on [ntfy.sh](https://ntfy.sh) as a message bus — no server,
 account, database or paid service:
 
-1. When a host enables publishing, the launcher sends a JSON heartbeat to
+1. When a host enables publishing, the launcher sends a JSON Ping to
    `https://ntfy.sh/kilnlauncher-rooms-v1` containing the room name, host, player count,
    invite code and `visibility: "public"`.
-2. The heartbeat is repeated every 60 seconds; ntfy keeps recent messages for 12 hours.
+2. The Ping is repeated every 60 seconds; ntfy keeps recent messages for 12 hours.
 3. Each launcher polls the last 20 minutes of the same topic, deduplicates by room id, keeps
-   the newest message per invite code and drops rooms without a heartbeat for 4 minutes.
+   the newest message per invite code and drops rooms without a Ping for 4 minutes.
 4. Closing a room sends an `action: "close"` message for immediate removal.
 
 Because the topic is public, no identity is required — and anyone can write to it, so clients
@@ -153,8 +153,8 @@ the host signed in with a Microsoft account — offline accounts can use any nam
 them would return unrelated rooms. The matching lives in `PublicRoom#matchesQuery` and does not
 depend on the UI.
 
-Rows show heartbeat age, e.g. "Online · Ping 12s ago". Hosts send a heartbeat every 60 seconds,
-so a room is only marked "May be offline" after three missed heartbeats (3 minutes).
+Rows show Ping age, e.g. "Online · Ping 12s ago". Hosts send a Ping every 60 seconds,
+so a room is only marked "May be offline" after three missed Pings (3 minutes).
 
 Implementation notes (`terracotta/lobby/`):
 
@@ -163,9 +163,9 @@ Implementation notes (`terracotta/lobby/`):
 - `PublicRoom` gained optional `tags` and `latency` fields. Receivers drop unknown tags,
   deduplicate, keep at most 8, and clamp latency to 0–10000 ms.
 - Latency is the **host-to-lobby-server (ntfy) round-trip time**, measured by the host and
-  written into the heartbeat — it describes the host's connection, not the guest's ping to the
+  written into the Ping — it describes the host's connection, not the guest's ping to the
   host. The first request includes DNS and TLS, which inflates it to ~900 ms, so publishing
-  sends once, measures again and uses the second value; heartbeats refresh it every 60 seconds.
+  sends once, measures again and uses the second value; Pings refresh it every 60 seconds.
   Hovering the latency badge shows a tooltip.
 
 ## Room password
@@ -263,7 +263,7 @@ If downloading the Gradle distribution from GitHub fails, fetch the same version
 | `AboutPage.java` | KilnLauncher version info, upstream attribution kept |
 | `TerracottaPage.java` | "Room Lobby" tab added |
 | `TerracottaControllerPage.java` | Publish switch, room name, tags and password added |
-| `terracotta/lobby/*` | Room model, ntfy directory client, heartbeat publisher, lobby page |
+| `terracotta/lobby/*` | Room model, ntfy directory client, Ping publisher, lobby page |
 | `terracotta/lobby/PublicRoomTag.java` | Tag set, published with rooms and used for filtering |
 | `terracotta/lobby/PublicRoomPassword.java` | Room password: PBKDF2 + AES-GCM encryption of the code |
 | `ui/construct/InputDialogPane.java` | Masked input variant for the room password |
