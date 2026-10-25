@@ -52,7 +52,11 @@ public final class Metadata {
     public static final String MANUAL_UPDATE_URL = "https://github.com/HMCL-dev/HMCL/releases";
 
     public static final String DOCS_URL = "https://docs.hmcl.net";
-    public static final String CONTACT_URL = DOCS_URL + "/help.html";
+    /// URL opened by the title bar help button and the crash window contact button.
+    ///
+    /// Points at the KilnLauncher repository instead of HMCL's help page, because the help
+    /// page documents a launcher this project is not.
+    public static final String CONTACT_URL = "https://github.com/misuOVO/KilnLauncher/";
     public static final String CHANGELOG_URL = DOCS_URL + "/changelog/";
     public static final String EULA_URL = DOCS_URL + "/eula/hmcl.html";
     public static final String GROUPS_URL = "https://www.bilibili.com/opus/905435541874409529";
