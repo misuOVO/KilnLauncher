@@ -82,6 +82,6 @@ language-subtag-registry
 # KilnLauncher build output
 /dist/
 /dist-for-friends/
-/dist-for-friends-pcl/
+/dist-for-friends-alt/
 /*.zip
 /run/

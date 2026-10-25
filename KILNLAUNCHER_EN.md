@@ -101,7 +101,6 @@ If SmartScreen reports an unknown publisher, choose "More info" and then "Run an
 KilnLauncher bundles Terracotta **0.4.2**, matching HMCL 3.15.2+, HMCL 3.16.4 and FCL.
 
 - Host and guest should use the same Terracotta generation; mixing them can make joining fail.
-- Terracotta 0.4.2 dropped the PCL CE specific room format, so PCL CE rooms cannot be joined.
 - After joining, the host must keep the world open to LAN, guests must use the address shown by
   Terracotta, and both sides need the same mods.
 - The lobby does not carry a Terracotta version marker yet, so mixed versions may see a room but

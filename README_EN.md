@@ -95,9 +95,6 @@ known working relay. Additional relays can be supplied with
 - The room lobby is a public topic: anyone who reads the messages can see what a room
   publishes. The room password keeps strangers out, but it cannot stop a targeted brute-force
   attack — use a reasonably long password.
-- Terracotta 0.4.2 dropped support for the PCL CE room format, so PCL CE rooms cannot be joined.
-- Terracotta is peer-to-peer. Whether a connection succeeds depends on both networks; VPNs and
-  TUN adapters often break it.
 
 ## Relationship to upstream
 
