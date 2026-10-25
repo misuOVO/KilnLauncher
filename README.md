@@ -1,5 +1,7 @@
 # KilnLauncher
 
+**简体中文** | [English](README_EN.md)
+
 KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/HMCL/releases/tag/v3.16.4)
 源码构建的 Minecraft 启动器分支，重点补上了「和朋友联机」这一块：把陶瓦联机（Terracotta）
 的房间公开到一个**免费、无需服务器**的房间大厅里，别人可以直接看到邀请码并加入。
