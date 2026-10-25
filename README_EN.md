@@ -105,7 +105,7 @@ This is an unofficial fork of HMCL and is not affiliated with the HMCL team, Moj
 Microsoft.
 
 - Upstream: <https://github.com/HMCL-dev/HMCL>
-- Detailed (Chinese) documentation: [KILNLAUNCHER.md](KILNLAUNCHER.md)
+- Detailed documentation: [README_EN.md](README_EN.md) · [KILNLAUNCHER_EN.md](KILNLAUNCHER_EN.md) (English) · [KILNLAUNCHER.md](KILNLAUNCHER.md) (Chinese)
 - Terracotta is a third-party open-source project; it is downloaded at runtime and is not
   bundled with this repository.
 

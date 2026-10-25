@@ -1,5 +1,7 @@
 # KilnLauncher
 
+**简体中文** | [English](KILNLAUNCHER_EN.md)
+
 KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/HMCL/releases/tag/v3.16.4)
 源码构建的 Minecraft 启动器，不是快照版。在当前免费、无服务器的前提下增加了「房间大厅」功能：
 **房主可以把陶瓦联机房间公开**，让所有使用 KilnLauncher 的玩家直接看到邀请码并一键加入。

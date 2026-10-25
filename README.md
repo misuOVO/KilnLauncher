@@ -95,7 +95,7 @@ KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/H
 本项目是 HMCL 的非官方分支，与 HMCL 开发团队、Mojang、Microsoft 均无关联。
 
 - 上游：<https://github.com/HMCL-dev/HMCL>
-- 详细中文文档：[KILNLAUNCHER.md](KILNLAUNCHER.md)
+- 详细文档：[KILNLAUNCHER.md](KILNLAUNCHER.md)（中文） / [KILNLAUNCHER_EN.md](KILNLAUNCHER_EN.md)（English）
 - 陶瓦联机（Terracotta）是第三方开源项目，运行时下载，不随本仓库分发
 
 ## 许可证
