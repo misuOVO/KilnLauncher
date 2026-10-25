@@ -66,7 +66,12 @@ public final class AboutPage extends SpinnerPane {
             author.setTitle("huanghongxun");
             author.setSubtitle(i18n("about.author.statement"));
 
-            about.getContent().setAll(launcher, author);
+            var feedback = LineButton.createExternalLinkButton(Metadata.ISSUES_URL);
+            feedback.setLargeTitle(true);
+            feedback.setTitle(i18n("about.feedback"));
+            feedback.setSubtitle(i18n("about.feedback.statement"));
+
+            about.getContent().setAll(launcher, author, feedback);
         }
 
         ComponentList thanks = loadIconedTwoLineList("/assets/about/thanks.json");
@@ -80,17 +85,17 @@ public final class AboutPage extends SpinnerPane {
             copyright.setTitle(i18n("about.copyright"));
             copyright.setSubtitle(i18n("about.copyright.statement"));
 
-            var claim = LineButton.createExternalLinkButton(Metadata.EULA_URL);
-            claim.setLargeTitle(true);
-            claim.setTitle(i18n("about.claim"));
-            claim.setSubtitle(i18n("about.claim.statement"));
+            var upstream = LineButton.createExternalLinkButton(Metadata.UPSTREAM_URL);
+            upstream.setLargeTitle(true);
+            upstream.setTitle(i18n("about.upstream"));
+            upstream.setSubtitle(i18n("about.upstream.statement"));
 
-            var openSource = LineButton.createExternalLinkButton("https://github.com/HMCL-dev/HMCL");
-            openSource.setLargeTitle(true);
-            openSource.setTitle(i18n("about.open_source"));
-            openSource.setSubtitle(i18n("about.open_source.statement"));
+            var license = LineButton.createExternalLinkButton(Metadata.LICENSE_URL);
+            license.setLargeTitle(true);
+            license.setTitle(i18n("about.license"));
+            license.setSubtitle(i18n("about.license.statement"));
 
-            legal.getContent().setAll(copyright, claim, openSource);
+            legal.getContent().setAll(copyright, upstream, license);
         }
 
         content.getChildren().setAll(
