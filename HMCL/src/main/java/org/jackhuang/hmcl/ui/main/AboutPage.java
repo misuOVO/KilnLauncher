@@ -52,7 +52,9 @@ public final class AboutPage extends SpinnerPane {
 
         ComponentList about = new ComponentList();
         {
-            var launcher = new LineButton();
+            // Clicking the launcher row opens the project repository, matching the
+            // external-link icon shown by the other rows.
+            var launcher = LineButton.createExternalLinkButton(Metadata.CONTACT_URL);
             launcher.setLargeTitle(true);
             launcher.setLeading(FXUtils.newBuiltinImage("/assets/img/icon.png"));
             launcher.setTitle(Metadata.FULL_NAME);
