@@ -17,6 +17,8 @@
  */
 package org.jackhuang.hmcl.bilibili;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.jackhuang.hmcl.util.gson.JsonUtils;
 import org.jackhuang.hmcl.util.io.NetworkUtils;
@@ -25,23 +27,22 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-/// Minimal client for the Bilibili web login API.
+/// Client for the Bilibili TV QR code login API.
 ///
-/// Only the endpoints needed by the room lobby are implemented: creating a QR code,
-/// polling its state and reading the profile of the logged-in user. The client uses the
-/// official web endpoints, so the QR code can be scanned with the regular Bilibili mobile
-/// application.
+/// The TV flow is used instead of the web flow because Bilibili split the web login into
+/// a crossDomain ticket exchange that does not always return `SESSDATA`. The TV poll
+/// endpoint returns the cookies directly in `data.cookie_info.cookies`, which makes the
+/// login reliable without following extra redirects.
 @NotNullByDefault
 public final class BilibiliApi {
     /// User agent sent with every request, because the login endpoints reject unknown clients.
@@ -49,33 +50,42 @@ public final class BilibiliApi {
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     /// Referer required by the login endpoints.
-    private static final String REFERER = "https://passport.bilibili.com/";
+    private static final String REFERER = "https://www.bilibili.com/";
 
-    /// Endpoint that creates a new QR code.
+    /// Bilibili TV (云视听小电视) app key.
+    private static final String APP_KEY = "4409e2ce8ffd12b8";
+
+    /// App secret belonging to [#APP_KEY], used to sign the requests.
+    private static final String APP_SECRET = "59b43e04ad6965f34319062b478f83dd";
+
+    /// Device id expected by the TV endpoints. Zero is accepted.
+    private static final String LOCAL_ID = "0";
+
+    /// Timestamp used in the signature. The TV endpoints accept a fixed zero.
+    private static final String TIMESTAMP = "0";
+
+    /// Endpoint that creates a new TV login QR code.
     private static final String GENERATE_URL =
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/generate?source=main-fe-header";
+            "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code";
 
-    /// Endpoint that reports the state of a QR code.
+    /// Endpoint that reports the state of a TV login QR code.
     private static final String POLL_URL =
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/poll";
+            "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll";
 
     /// Endpoint that returns the profile of the logged-in user.
     private static final String NAV_URL = "https://api.bilibili.com/x/web-interface/nav";
 
-    /// QR code state reported by the poll endpoint: the code has not been scanned yet.
-    private static final int STATE_WAITING = 86101;
-
-    /// QR code state reported by the poll endpoint: the code was scanned but not confirmed.
-    private static final int STATE_SCANNED = 86090;
-
-    /// QR code state reported by the poll endpoint: the code expired.
+    /// Poll code: the QR code expired.
     private static final int STATE_EXPIRED = 86038;
 
-    /// Matches absolute URLs embedded in an HTML or JSON response body.
-    ///
-    /// Backslashes are allowed because JSON may escape `&` as `\u0026`; the escape is
-    /// decoded after the match so parameters are not cut off.
-    private static final Pattern LOGIN_URL_PATTERN = Pattern.compile("https?://[^\\s\"'<>]+");
+    /// Poll code: the code was scanned and waits for confirmation on the phone.
+    private static final int STATE_SCANNED = 86090;
+
+    /// Poll code used by the TV endpoint for "scanned, not confirmed yet".
+    private static final int STATE_SCANNED_TV = 86039;
+
+    /// Poll code: the code has not been scanned yet.
+    private static final int STATE_WAITING = 86101;
 
     /// A newly created QR code.
     ///
@@ -119,87 +129,100 @@ public final class BilibiliApi {
     /// @return the QR code content and polling key
     /// @throws IOException if the endpoint cannot be reached or returns an error
     public static QrCode generateQrCode() throws IOException {
-        JsonObject root = getJson(GENERATE_URL, null);
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("appkey", APP_KEY);
+        params.put("local_id", LOCAL_ID);
+        params.put("ts", TIMESTAMP);
+        params.put("sign", sign(params));
+
+        JsonObject root = postForm(GENERATE_URL, params);
         @Nullable JsonObject data = getObject(root, "data");
         if (JsonUtils.getInt(root, "code", -1) != 0 || data == null) {
-            throw new IOException("Bilibili rejected the QR code request: "
+            throw new IOException("Bilibili rejected the TV QR code request: "
                     + JsonUtils.getString(root, "message", "unknown error"));
         }
 
         @Nullable String url = JsonUtils.getString(data, "url");
-        @Nullable String key = JsonUtils.getString(data, "qrcode_key");
+        @Nullable String key = JsonUtils.getString(data, "auth_code");
         if (url == null || key == null) {
-            throw new IOException("Bilibili returned an incomplete QR code");
+            throw new IOException("Bilibili returned an incomplete TV QR code");
         }
         return new QrCode(url, key);
     }
 
-    /// Polls the state of a QR code.
+    /// Polls the state of a TV login QR code.
     ///
-    /// On success the returned account contains the cookies set by the login response and
-    /// the profile fetched from the nav endpoint. The profile request is best effort: a
-    /// failure only leaves the display name empty and never discards a valid login.
+    /// On success the returned account contains the cookies from `cookie_info.cookies`
+    /// and the profile fetched from the nav endpoint. The profile request is best effort:
+    /// a failure only leaves the display name empty and never discards a valid login.
     ///
-    /// @param qrCodeKey the key returned by [ #generateQrCode() ]
+    /// @param authCode the key returned by [#generateQrCode()]
     /// @return the current state of the login attempt
     /// @throws IOException if the endpoint cannot be reached or returns an error
-    public static PollResult poll(String qrCodeKey) throws IOException {
-        HttpURLConnection connection = open(POLL_URL
-                + "?qrcode_key=" + URLEncoder.encode(qrCodeKey, StandardCharsets.UTF_8)
-                + "&source=main-fe-header", null);
-        String body;
-        Map<String, String> cookies;
-        try {
-            body = NetworkUtils.readFullyAsString(connection);
-            cookies = collectCookies(connection.getHeaderFields());
-        } finally {
-            connection.disconnect();
-        }
+    public static PollResult poll(String authCode) throws IOException {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("appkey", APP_KEY);
+        params.put("auth_code", authCode);
+        params.put("local_id", LOCAL_ID);
+        params.put("ts", TIMESTAMP);
+        params.put("sign", sign(params));
 
-        @Nullable JsonObject root = JsonUtils.fromJson(body, JsonObject.class);
-        if (root == null) {
-            throw new IOException("Bilibili returned an empty response");
-        }
-
+        JsonObject root = postForm(POLL_URL, params);
+        int code = JsonUtils.getInt(root, "code", -1);
         @Nullable JsonObject data = getObject(root, "data");
-        int state = data != null ? JsonUtils.getInt(data, "code", -1) : -1;
-        if (JsonUtils.getInt(root, "code", -1) != 0) {
-            throw new IOException("Bilibili login failed: "
-                    + JsonUtils.getString(root, "message", "unknown error"));
-        }
 
-        switch (state) {
+        switch (code) {
+            case 0:
+                if (data == null || getObject(data, "cookie_info") == null) {
+                    return new PollResult(PollStatus.WAITING, null);
+                }
+                return new PollResult(PollStatus.SUCCESS, accountFrom(data));
             case STATE_WAITING:
+            case STATE_SCANNED_TV:
+                // The TV endpoint reports "not confirmed" for both the unscanned and the
+                // scanned state, so both map to waiting.
                 return new PollResult(PollStatus.WAITING, null);
             case STATE_SCANNED:
                 return new PollResult(PollStatus.SCANNED, null);
             case STATE_EXPIRED:
                 return new PollResult(PollStatus.EXPIRED, null);
             default:
-                break;
+                throw new IOException("Bilibili TV login failed: code=" + code
+                        + ", message=" + JsonUtils.getString(root, "message", "unknown error"));
         }
+    }
 
-        // Any other value means the login succeeded; older responses used 0 explicitly.
-        //
-        // Since 2026-08 Bilibili no longer sets the cookies on the poll response itself.
-        // Instead data.url is a crossDomain ticket link that has to be visited before the
-        // SESSDATA / bili_jct / DedeUserID cookies are returned through Set-Cookie.
-        @Nullable String successUrl = data != null ? JsonUtils.getString(data, "url") : null;
-        if (successUrl != null && !successUrl.isBlank()) {
-            cookies.putAll(parseCookiesFromQuery(successUrl));
-            exchangeLoginTicket(successUrl, cookies);
+    /// Builds the account from a successful TV poll response.
+    private static BilibiliAccount accountFrom(JsonObject data) throws IOException {
+        Map<String, String> cookies = new LinkedHashMap<>();
+        @Nullable JsonObject cookieInfo = getObject(data, "cookie_info");
+        if (cookieInfo != null) {
+            JsonElement cookiesElement = cookieInfo.get("cookies");
+            if (cookiesElement != null && cookiesElement.isJsonArray()) {
+                JsonArray array = cookiesElement.getAsJsonArray();
+                for (JsonElement element : array) {
+                    if (!element.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject cookie = element.getAsJsonObject();
+                    @Nullable String name = JsonUtils.getString(cookie, "name");
+                    @Nullable String value = JsonUtils.getString(cookie, "value");
+                    if (name != null && value != null) {
+                        cookies.put(name, value);
+                    }
+                }
+            }
         }
 
         @Nullable String sessData = cookies.get("SESSDATA");
         if (sessData == null || sessData.isBlank()) {
-            throw new IOException("Bilibili confirmed the login but returned no session cookie"
-                    + " (successUrl=" + (successUrl == null || successUrl.isBlank() ? "none" : "present")
-                    + ", cookies=" + cookies.keySet() + ")");
+            throw new IOException("Bilibili confirmed the TV login but returned no SESSDATA"
+                    + " (cookies=" + cookies.keySet() + ")");
         }
 
         String biliJct = cookies.getOrDefault("bili_jct", "");
         String dedeUserId = cookies.getOrDefault("DedeUserID", "");
-        long mid = parseLong(dedeUserId);
+        long mid = getLong(data, "mid", parseLong(dedeUserId));
 
         @Nullable Profile profile;
         try {
@@ -208,14 +231,14 @@ public final class BilibiliApi {
             profile = null;
         }
 
-        return new PollResult(PollStatus.SUCCESS, new BilibiliAccount(
+        return new BilibiliAccount(
                 profile != null ? profile.mid() : mid,
                 profile != null ? profile.name() : "",
                 profile != null ? profile.avatarUrl() : "",
                 sessData,
                 biliJct,
                 dedeUserId,
-                System.currentTimeMillis()));
+                System.currentTimeMillis());
     }
 
     /// Fetches the public profile belonging to the given cookies.
@@ -239,10 +262,31 @@ public final class BilibiliApi {
                 JsonUtils.getString(data, "face", ""));
     }
 
-    /// Sends a GET request and parses the JSON body.
-    private static JsonObject getJson(String url, @Nullable String cookie) throws IOException {
-        HttpURLConnection connection = open(url, cookie);
+    /// Sends a form-encoded POST request and parses the JSON body.
+    private static JsonObject postForm(String url, Map<String, String> params) throws IOException {
+        StringBuilder body = new StringBuilder(128);
+        for (var entry : params.entrySet()) {
+            if (!body.isEmpty()) {
+                body.append('&');
+            }
+            body.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
+                    .append('=')
+                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+        }
+
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection connection = NetworkUtils.createHttpConnection(url);
         try {
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Referer", REFERER);
+            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+            connection.setFixedLengthStreamingMode(payload.length);
+            try (var output = connection.getOutputStream()) {
+                output.write(payload);
+            }
+
             @Nullable JsonObject root = JsonUtils.fromJson(
                     NetworkUtils.readFullyAsString(connection), JsonObject.class);
             if (root == null) {
@@ -254,11 +298,8 @@ public final class BilibiliApi {
         }
     }
 
-    /// Opens a connection with the headers expected by Bilibili and follows redirects.
-    ///
-    /// The headers must be set before [NetworkUtils#resolveConnection] runs, because that
-    /// method already connects and copies the current request properties to redirects.
-    private static HttpURLConnection open(String url, @Nullable String cookie) throws IOException {
+    /// Sends a GET request and parses the JSON body.
+    private static JsonObject getJson(String url, @Nullable String cookie) throws IOException {
         HttpURLConnection connection = NetworkUtils.createHttpConnection(url);
         connection.setRequestProperty("User-Agent", USER_AGENT);
         connection.setRequestProperty("Referer", REFERER);
@@ -266,7 +307,16 @@ public final class BilibiliApi {
         if (cookie != null) {
             connection.setRequestProperty("Cookie", cookie);
         }
-        return NetworkUtils.resolveConnection(connection);
+        try {
+            @Nullable JsonObject root = JsonUtils.fromJson(
+                    NetworkUtils.readFullyAsString(connection), JsonObject.class);
+            if (root == null) {
+                throw new IOException("Bilibili returned an empty response");
+            }
+            return root;
+        } finally {
+            connection.disconnect();
+        }
     }
 
     /// Returns the named object member, or `null` when the member is missing or not an object.
@@ -282,24 +332,21 @@ public final class BilibiliApi {
                 && element.getAsBoolean();
     }
 
-    /// Builds a `Cookie` header from the collected cookie pairs.
-    private static String buildCookieHeader(Map<String, String> cookies) {
-        StringBuilder builder = new StringBuilder();
-        for (var entry : cookies.entrySet()) {
-            if (entry.getValue().isBlank()) {
-                continue;
-            }
-            if (!builder.isEmpty()) {
-                builder.append("; ");
-            }
-            builder.append(entry.getKey()).append('=').append(entry.getValue());
+    /// Returns the named long member, defaulting to `defaultValue` when missing or malformed.
+    private static long getLong(JsonObject root, String key, long defaultValue) {
+        var element = root.get(key);
+        if (element == null || !element.isJsonPrimitive()) {
+            return defaultValue;
         }
-        return builder.toString();
+        try {
+            return element.getAsLong();
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     /// Parses a decimal id, returning zero for malformed values.
-    private static long parseLong(@Nullable String value) {
-        if (value == null || value.isBlank()) {
+    private static long parseLong(@Nullable String value) {        if (value == null || value.isBlank()) {
             return 0L;
         }
         try {
@@ -309,202 +356,40 @@ public final class BilibiliApi {
         }
     }
 
-    /// Extracts the `Set-Cookie` pairs from response headers.
-    private static Map<String, String> collectCookies(Map<String, List<String>> headers) {
-        Map<String, String> cookies = new LinkedHashMap<>();
-        for (var entry : headers.entrySet()) {
-            if (entry.getKey() == null || !entry.getKey().equalsIgnoreCase("Set-Cookie")) {
-                continue;
-            }
-            for (String header : entry.getValue()) {
-                int semicolon = header.indexOf(';');
-                String pair = semicolon >= 0 ? header.substring(0, semicolon) : header;
-                int equals = pair.indexOf('=');
-                if (equals <= 0) {
-                    continue;
-                }
-                cookies.put(pair.substring(0, equals).trim(), pair.substring(equals + 1).trim());
-            }
-        }
-        return cookies;
-    }
-
-    /// Reads cookie pairs embedded in the query string of a legacy success URL.
+    /// Signs the parameters as required by the TV endpoints.
     ///
-    /// The values stay URL-encoded on purpose: this is exactly how Bilibili stores them
-    /// inside the cookie itself, so decoding would corrupt `SESSDATA`.
-    private static Map<String, String> parseCookiesFromQuery(String url) {
-        Map<String, String> cookies = new LinkedHashMap<>();
-        int question = url.indexOf('?');
-        if (question < 0) {
-            return cookies;
-        }
+    /// The signature is the MD5 of the alphabetically sorted `key=value` pairs joined with
+    /// `&`, followed by the app secret.
+    private static String sign(Map<String, String> params) {
+        List<String> keys = new ArrayList<>(params.keySet());
+        Collections.sort(keys);
 
-        String query = url.substring(question + 1);
-        int fragment = query.indexOf('#');
-        if (fragment >= 0) {
-            query = query.substring(0, fragment);
+        StringBuilder builder = new StringBuilder(128);
+        for (String key : keys) {
+            if (!builder.isEmpty()) {
+                builder.append('&');
+            }
+            builder.append(key).append('=').append(params.get(key));
         }
+        builder.append(APP_SECRET);
 
-        for (String pair : query.split("&")) {
-            int equals = pair.indexOf('=');
-            if (equals <= 0) {
-                continue;
-            }
-            String name = pair.substring(0, equals);
-            if ("SESSDATA".equals(name) || "bili_jct".equals(name) || "DedeUserID".equals(name)) {
-                cookies.put(name, pair.substring(equals + 1));
-            }
-        }
-        return cookies;
+        return md5Hex(builder.toString());
     }
 
-    /// Exchanges the crossDomain ticket for the real login cookies.
-    ///
-    /// The ticket response sets most cookies but not `SESSDATA`: its body contains an
-    /// `sso` link that has to be visited as well, exactly like a browser would do.
-    private static void exchangeLoginTicket(String successUrl, Map<String, String> cookies) {
-        // First try exactly like the reference implementation: a bare request without the
-        // poll session cookies, which is what a fresh browser-like client would send.
-        @Nullable String body = fetchAndCollect(successUrl, cookies, false);
-        if (cookies.containsKey("SESSDATA") || followLoginLinks(body, cookies)) {
-            return;
-        }
-
-        // Retry with the cookies collected from the poll response. Some accounts only
-        // complete the exchange when the buvid3/sid of the same session is present.
-        body = fetchAndCollect(successUrl, cookies, true);
-        if (cookies.containsKey("SESSDATA") || followLoginLinks(body, cookies)) {
-            return;
-        }
-
-        // The ticket is tied to one passport host. Retry on the other host and its
-        // crossDomain path before giving up.
-        Map<String, String> query = parseQuery(successUrl);
-        @Nullable String ticket = query.get("ticket");
-        if (ticket == null || ticket.isBlank()) {
-            return;
-        }
-
-        String gourl = query.getOrDefault("gourl", "https://www.bilibili.com");
-        String[] candidates = {
-                "https://passport.biligame.com/x/passport-login/web/crossDomain",
-                "https://passport.bilibili.com/x/passport-login/web/crossDomain",
-                "https://passport.biligame.com/crossDomain"
-        };
-        for (String candidate : candidates) {
-            @Nullable String retryBody = fetchAndCollect(candidate
-                            + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8)
-                            + "&gourl=" + URLEncoder.encode(gourl, StandardCharsets.UTF_8), cookies, true);
-            if (cookies.containsKey("SESSDATA") || followLoginLinks(retryBody, cookies)) {
-                return;
+    /// Returns the lower-case hexadecimal MD5 digest of the given text.
+    private static String md5Hex(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("MD5")
+                    .digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                builder.append(Character.forDigit((value >> 4) & 0xF, 16));
+                builder.append(Character.forDigit(value & 0xF, 16));
             }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError("MD5 is required by the Java platform", e);
         }
-    }
-
-    /// Follows the `sso` links embedded in a crossDomain response.
-    ///
-    /// @return whether the session cookie was obtained
-    private static boolean followLoginLinks(@Nullable String body, Map<String, String> cookies) {
-        if (body == null) {
-            return false;
-        }
-
-        Matcher matcher = LOGIN_URL_PATTERN.matcher(body.replace("\\/", "/"));
-        int followed = 0;
-        while (matcher.find() && followed < 5) {
-            String url = matcher.group()
-                    .replace("\\u0026", "&")
-                    .replace("&amp;", "&");
-            while (!url.isEmpty() && ",;)]}".indexOf(url.charAt(url.length() - 1)) >= 0) {
-                url = url.substring(0, url.length() - 1);
-            }
-            if (!url.toLowerCase(Locale.ROOT).contains("sso")) {
-                continue;
-            }
-
-            followed++;
-            cookies.putAll(parseCookiesFromQuery(url));
-            fetchAndCollect(url, cookies, true);
-            if (cookies.containsKey("SESSDATA")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// Fetches a URL, collecting `Set-Cookie` headers from every redirect hop.
-    ///
-    /// @param sendCookies whether the cookies collected so far are sent with the request
-    /// @return the final response body, or `null` when it could not be read
-    private static @Nullable String fetchAndCollect(String url, Map<String, String> cookies, boolean sendCookies) {
-        String current = url;
-        for (int redirect = 0; redirect < 8; redirect++) {
-            HttpURLConnection connection = null;
-            try {
-                connection = NetworkUtils.createHttpConnection(current);
-                connection.setRequestProperty("User-Agent", USER_AGENT);
-                connection.setRequestProperty("Referer", "https://passport.bilibili.com/");
-                connection.setRequestProperty("Accept", "text/html,application/json,*/*");
-                connection.setInstanceFollowRedirects(false);
-
-                // Carry over cookies set by earlier hops (buvid3, sid, ...), because the
-                // ticket exchange validates the same browser session.
-                if (sendCookies) {
-                    String cookieHeader = buildCookieHeader(cookies);
-                    if (!cookieHeader.isEmpty()) {
-                        connection.setRequestProperty("Cookie", cookieHeader);
-                    }
-                }
-
-                int code = connection.getResponseCode();
-                cookies.putAll(collectCookies(connection.getHeaderFields()));
-
-                @Nullable String location = connection.getHeaderField("Location");
-                if (code >= 300 && code < 400 && location != null && !location.isBlank()) {
-                    current = new URL(connection.getURL(), location).toString();
-                    continue;
-                }
-
-                if (code / 100 == 2) {
-                    return NetworkUtils.readFullyAsString(connection);
-                }
-                return null;
-            } catch (IOException e) {
-                return null;
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            }
-        }
-        return null;
-    }
-
-    /// Parses a query string into URL-decoded values.
-    private static Map<String, String> parseQuery(String url) {
-        Map<String, String> query = new LinkedHashMap<>();
-        int question = url.indexOf('?');
-        if (question < 0) {
-            return query;
-        }
-
-        String raw = url.substring(question + 1);
-        int fragment = raw.indexOf('#');
-        if (fragment >= 0) {
-            raw = raw.substring(0, fragment);
-        }
-
-        for (String pair : raw.split("&")) {
-            int equals = pair.indexOf('=');
-            if (equals <= 0) {
-                continue;
-            }
-            query.put(
-                    URLDecoder.decode(pair.substring(0, equals), StandardCharsets.UTF_8),
-                    URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8));
-        }
-        return query;
     }
 
     private BilibiliApi() {
