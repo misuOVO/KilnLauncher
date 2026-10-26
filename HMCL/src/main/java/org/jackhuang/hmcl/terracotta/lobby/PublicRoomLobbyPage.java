@@ -27,11 +27,13 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Circle;
 import javafx.util.Duration;
 import com.jfoenix.controls.JFXTextField;
 import org.jackhuang.hmcl.ui.construct.JFXHyperlink;
@@ -116,6 +118,12 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
     /// Shows which Bilibili account is currently bound to the lobby.
     private final Label accountLabel = new Label();
 
+    /// Circular avatar of the bound Bilibili account.
+    private final ImageView avatarView = new ImageView();
+
+    /// URL of the avatar currently bound to [#avatarView], used to avoid reloading it.
+    private @Nullable String avatarUrl;
+
     /// Container holding one row per public room.
     private final ComponentList roomList = new ComponentList();
 
@@ -157,9 +165,14 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
         content.getChildren().add(hint);
 
         accountLabel.getStyleClass().add("terracotta-hint");
+        avatarView.setFitWidth(28);
+        avatarView.setFitHeight(28);
+        avatarView.setPreserveRatio(true);
+        avatarView.setSmooth(true);
+        avatarView.setClip(new Circle(14, 14, 14));
         JFXHyperlink logoutLink = new JFXHyperlink(i18n("bilibili.account.logout"));
         logoutLink.setOnAction(event -> confirmLogout());
-        HBox accountRow = new HBox(8, accountLabel, logoutLink);
+        HBox accountRow = new HBox(8, avatarView, accountLabel, logoutLink);
         accountRow.setAlignment(Pos.CENTER_LEFT);
         content.getChildren().add(accountRow);
         updateAccountLabel();
@@ -579,6 +592,28 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
                 ? i18n("bilibili.account.unnamed", account.mid())
                 : account.name())
                 : i18n("bilibili.login.required"));
+        updateAvatar(account);
+    }
+
+    /// Loads the avatar of the given account, or hides the avatar when there is none.
+    private void updateAvatar(@Nullable BilibiliAccount account) {
+        String url = account != null ? account.avatarUrl() : "";
+        if (url.equals(avatarUrl)) {
+            return;
+        }
+        avatarUrl = url;
+
+        avatarView.imageProperty().unbind();
+        if (url.isBlank()) {
+            avatarView.setImage(null);
+            avatarView.setVisible(false);
+            avatarView.setManaged(false);
+            return;
+        }
+
+        avatarView.setVisible(true);
+        avatarView.setManaged(true);
+        avatarView.imageProperty().bind(FXUtils.newRemoteImage(url, 64, 64, true, true));
     }
 
     /// Asks for confirmation before removing the bound Bilibili account.

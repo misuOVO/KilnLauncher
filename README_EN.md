@@ -36,7 +36,7 @@ lobby while signed out shows "Sign in with Bilibili"; scan the QR code with the 
 mobile app to continue.
 
 - Credentials are stored only in `.kilnlauncher/private/bilibili-account.json` on this computer.
-- The lobby header shows the bound account and offers a sign-out link.
+- The lobby header shows the bound account's avatar and name, with a sign-out link.
 - The check runs locally and is meant as an identity binding, not as real access control.
 
 ### Mod dependencies

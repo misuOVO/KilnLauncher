@@ -256,10 +256,17 @@ public final class BilibiliApi {
             return null;
         }
 
+        String avatarUrl = JsonUtils.getString(data, "face", "");
+        if (avatarUrl.startsWith("//")) {
+            avatarUrl = "https:" + avatarUrl;
+        } else if (avatarUrl.startsWith("http://")) {
+            avatarUrl = "https://" + avatarUrl.substring("http://".length());
+        }
+
         return new Profile(
                 JsonUtils.getInt(data, "mid", 0),
                 JsonUtils.getString(data, "uname", ""),
-                JsonUtils.getString(data, "face", ""));
+                avatarUrl);
     }
 
     /// Sends a form-encoded POST request and parses the JSON body.

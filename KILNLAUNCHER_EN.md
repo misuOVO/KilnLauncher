@@ -33,9 +33,8 @@ The room lobby and the publish switch require a bound Bilibili account:
 - Clicking "Room Lobby" while signed out shows the "Sign in with Bilibili" dialog.
 - Scan its QR code with the Bilibili mobile app and confirm on the phone.
 - Credentials are stored only in `.kilnlauncher/private/bilibili-account.json`.
-- The lobby header shows the bound account and a sign-out link. Signing out gates the lobby
-  and the publish switch again.
-
+- The lobby header shows the bound account's avatar and name, with a sign-out link.
+  Signing out gates the lobby and the publish switch again.
 > The check runs in the client, so it binds an identity but cannot stop a modified client.
 
 ### Publish switch
