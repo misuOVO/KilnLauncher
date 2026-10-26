@@ -364,7 +364,16 @@ public final class BilibiliApi {
     /// The ticket response sets most cookies but not `SESSDATA`: its body contains an
     /// `sso` link that has to be visited as well, exactly like a browser would do.
     private static void exchangeLoginTicket(String successUrl, Map<String, String> cookies) {
-        @Nullable String body = fetchAndCollect(successUrl, cookies);
+        // First try exactly like the reference implementation: a bare request without the
+        // poll session cookies, which is what a fresh browser-like client would send.
+        @Nullable String body = fetchAndCollect(successUrl, cookies, false);
+        if (cookies.containsKey("SESSDATA") || followLoginLinks(body, cookies)) {
+            return;
+        }
+
+        // Retry with the cookies collected from the poll response. Some accounts only
+        // complete the exchange when the buvid3/sid of the same session is present.
+        body = fetchAndCollect(successUrl, cookies, true);
         if (cookies.containsKey("SESSDATA") || followLoginLinks(body, cookies)) {
             return;
         }
@@ -386,7 +395,7 @@ public final class BilibiliApi {
         for (String candidate : candidates) {
             @Nullable String retryBody = fetchAndCollect(candidate
                             + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8)
-                            + "&gourl=" + URLEncoder.encode(gourl, StandardCharsets.UTF_8), cookies);
+                            + "&gourl=" + URLEncoder.encode(gourl, StandardCharsets.UTF_8), cookies, true);
             if (cookies.containsKey("SESSDATA") || followLoginLinks(retryBody, cookies)) {
                 return;
             }
@@ -416,7 +425,7 @@ public final class BilibiliApi {
 
             followed++;
             cookies.putAll(parseCookiesFromQuery(url));
-            fetchAndCollect(url, cookies);
+            fetchAndCollect(url, cookies, true);
             if (cookies.containsKey("SESSDATA")) {
                 return true;
             }
@@ -426,8 +435,9 @@ public final class BilibiliApi {
 
     /// Fetches a URL, collecting `Set-Cookie` headers from every redirect hop.
     ///
+    /// @param sendCookies whether the cookies collected so far are sent with the request
     /// @return the final response body, or `null` when it could not be read
-    private static @Nullable String fetchAndCollect(String url, Map<String, String> cookies) {
+    private static @Nullable String fetchAndCollect(String url, Map<String, String> cookies, boolean sendCookies) {
         String current = url;
         for (int redirect = 0; redirect < 8; redirect++) {
             HttpURLConnection connection = null;
@@ -440,9 +450,11 @@ public final class BilibiliApi {
 
                 // Carry over cookies set by earlier hops (buvid3, sid, ...), because the
                 // ticket exchange validates the same browser session.
-                String cookieHeader = buildCookieHeader(cookies);
-                if (!cookieHeader.isEmpty()) {
-                    connection.setRequestProperty("Cookie", cookieHeader);
+                if (sendCookies) {
+                    String cookieHeader = buildCookieHeader(cookies);
+                    if (!cookieHeader.isEmpty()) {
+                        connection.setRequestProperty("Cookie", cookieHeader);
+                    }
                 }
 
                 int code = connection.getResponseCode();
