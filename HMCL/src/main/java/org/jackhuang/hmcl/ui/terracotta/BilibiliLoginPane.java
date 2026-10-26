@@ -26,12 +26,12 @@ import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Group;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.SVGPath;
 import javafx.util.Duration;
 import org.jackhuang.hmcl.bilibili.BilibiliAccount;
 import org.jackhuang.hmcl.bilibili.BilibiliAccountManager;
@@ -40,7 +40,6 @@ import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
 import org.jackhuang.hmcl.ui.construct.DialogAware;
 import org.jackhuang.hmcl.ui.construct.DialogCloseEvent;
-import org.jackhuang.hmcl.util.QrCodeUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -60,8 +59,11 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
     /// Interval between two polls of the QR code state.
     private static final Duration POLL_INTERVAL = Duration.seconds(2);
 
-    /// Pixel size of one QR code module.
-    private static final int QR_SCALE = 5;
+    /// Pixel size of the QR code canvas.
+    private static final int QR_CANVAS_SIZE = 240;
+
+    /// Quiet zone around the QR code, in modules. The QR specification requires four.
+    private static final int QR_BORDER_MODULES = 4;
 
     /// Callback invoked after a successful login.
     private final Runnable onSuccess;
@@ -96,6 +98,9 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
 
     /// Whether the current failure was already written to the log.
     private boolean failureLogged;
+
+    /// Last poll state reported by Bilibili, used to log transitions only once.
+    private @Nullable BilibiliApi.PollStatus lastStatus;
 
     /// Creates the login dialog.
     ///
@@ -157,6 +162,7 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
         qrCodeKey = null;
         consecutiveFailures = 0;
         failureLogged = false;
+        lastStatus = null;
 
         refreshButton.setDisable(true);
         qrContainer.getChildren().setAll(new JFXSpinner());
@@ -183,14 +189,32 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
                 .start();
     }
 
-    /// Renders the QR code content.
+    /// Renders the QR code content at its final pixel size.
+    ///
+    /// A [Canvas] is used instead of a scaled [javafx.scene.shape.SVGPath], because
+    /// JavaFX rasterizes the path at its unscaled size and the subsequent scale
+    /// transform blurs the modules, which makes the code unreadable for phone cameras.
     private void showQrCode(String content) {
-        SVGPath path = new SVGPath();
-        path.setContent(QrCodeUtils.toSVGPath(QrCode.encodeText(content, QrCode.Ecc.MEDIUM), 2));
-        path.setFill(Color.BLACK);
-        path.setScaleX(QR_SCALE);
-        path.setScaleY(QR_SCALE);
-        qrContainer.getChildren().setAll(new Group(path));
+        QrCode qr = QrCode.encodeText(content, QrCode.Ecc.MEDIUM);
+        int modules = qr.size + QR_BORDER_MODULES * 2;
+        int scale = Math.max(1, (QR_CANVAS_SIZE - 12) / modules);
+        int pixels = modules * scale;
+
+        Canvas canvas = new Canvas(pixels, pixels);
+        GraphicsContext graphics = canvas.getGraphicsContext2D();
+        graphics.setFill(Color.WHITE);
+        graphics.fillRect(0, 0, pixels, pixels);
+        graphics.setFill(Color.BLACK);
+        for (int y = 0; y < qr.size; y++) {
+            for (int x = 0; x < qr.size; x++) {
+                if (qr.getModule(x, y)) {
+                    graphics.fillRect((x + QR_BORDER_MODULES) * scale,
+                            (y + QR_BORDER_MODULES) * scale, scale, scale);
+                }
+            }
+        }
+
+        qrContainer.getChildren().setAll(canvas);
     }
 
     /// Polls the state of the displayed QR code once.
@@ -225,6 +249,11 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
 
                     consecutiveFailures = 0;
                     failureLogged = false;
+
+                    if (result.status() != lastStatus) {
+                        lastStatus = result.status();
+                        LOG.info("Bilibili QR login state: " + result.status());
+                    }
 
                     switch (result.status()) {
                         case WAITING -> statusLabel.setText(i18n("bilibili.login.scan"));
