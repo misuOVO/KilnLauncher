@@ -22,6 +22,7 @@ import com.jfoenix.controls.JFXDialogLayout;
 import com.jfoenix.controls.JFXSpinner;
 import io.nayuki.qrcodegen.QrCode;
 import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -90,6 +91,12 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
     /// Whether the dialog was closed, which discards late responses.
     private boolean closed;
 
+    /// Number of consecutive failed poll requests for the current QR code.
+    private int consecutiveFailures;
+
+    /// Whether the current failure was already written to the log.
+    private boolean failureLogged;
+
     /// Creates the login dialog.
     ///
     /// @param onSuccess callback invoked after the account was stored successfully
@@ -148,6 +155,8 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
         polling = false;
         completed = false;
         qrCodeKey = null;
+        consecutiveFailures = 0;
+        failureLogged = false;
 
         refreshButton.setDisable(true);
         qrContainer.getChildren().setAll(new JFXSpinner());
@@ -199,18 +208,41 @@ public final class BilibiliLoginPane extends JFXDialogLayout implements DialogAw
                         return;
                     }
                     if (exception != null || result == null) {
-                        // Network hiccups are common; keep polling until the code expires.
-                        statusLabel.setText(i18n("bilibili.login.retry"));
+                        consecutiveFailures++;
+                        if (exception != null && !failureLogged) {
+                            failureLogged = true;
+                            LOG.warning("Failed to poll Bilibili QR code", exception);
+                        }
+
+                        if (consecutiveFailures >= 5) {
+                            pollTimer.stop();
+                            statusLabel.setText(i18n("bilibili.login.failed"));
+                        } else {
+                            statusLabel.setText(i18n("bilibili.login.retry"));
+                        }
                         return;
                     }
+
+                    consecutiveFailures = 0;
+                    failureLogged = false;
 
                     switch (result.status()) {
                         case WAITING -> statusLabel.setText(i18n("bilibili.login.scan"));
                         case SCANNED -> statusLabel.setText(i18n("bilibili.login.scanned"));
                         case EXPIRED -> {
+                            // Refresh automatically: waiting for a manual click after the
+                            // three minute lifetime is the main reason logins failed before.
                             pollTimer.stop();
                             qrCodeKey = null;
                             statusLabel.setText(i18n("bilibili.login.expired"));
+
+                            PauseTransition delay = new PauseTransition(Duration.seconds(1.5));
+                            delay.setOnFinished(event -> {
+                                if (!closed && !completed) {
+                                    startLogin();
+                                }
+                            });
+                            delay.play();
                         }
                         case SUCCESS -> completeLogin(result.account());
                     }

@@ -25,6 +25,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -169,9 +171,25 @@ public final class BilibiliApi {
         }
 
         // Any other value means the login succeeded; older responses used 0 explicitly.
+        //
+        // Since 2026-08 Bilibili no longer sets the cookies on the poll response itself.
+        // Instead data.url is a crossDomain ticket link that has to be visited before the
+        // SESSDATA / bili_jct / DedeUserID cookies are returned through Set-Cookie.
+        @Nullable String successUrl = data != null ? JsonUtils.getString(data, "url") : null;
+        if (successUrl != null && !successUrl.isBlank()) {
+            cookies.putAll(parseCookiesFromQuery(successUrl));
+            collectCookiesFromUrl(successUrl, cookies);
+
+            if (!cookies.containsKey("SESSDATA")) {
+                collectCookiesFromTicket(successUrl, cookies);
+            }
+        }
+
         @Nullable String sessData = cookies.get("SESSDATA");
         if (sessData == null || sessData.isBlank()) {
-            throw new IOException("Bilibili reported success without a session cookie");
+            throw new IOException("Bilibili confirmed the login but returned no session cookie"
+                    + " (successUrl=" + (successUrl == null || successUrl.isBlank() ? "none" : "present")
+                    + ", cookies=" + cookies.keySet() + ")");
         }
 
         String biliJct = cookies.getOrDefault("bili_jct", "");
@@ -259,6 +277,21 @@ public final class BilibiliApi {
                 && element.getAsBoolean();
     }
 
+    /// Builds a `Cookie` header from the collected cookie pairs.
+    private static String buildCookieHeader(Map<String, String> cookies) {
+        StringBuilder builder = new StringBuilder();
+        for (var entry : cookies.entrySet()) {
+            if (entry.getValue().isBlank()) {
+                continue;
+            }
+            if (!builder.isEmpty()) {
+                builder.append("; ");
+            }
+            builder.append(entry.getKey()).append('=').append(entry.getValue());
+        }
+        return builder.toString();
+    }
+
     /// Parses a decimal id, returning zero for malformed values.
     private static long parseLong(@Nullable String value) {
         if (value == null || value.isBlank()) {
@@ -289,6 +322,129 @@ public final class BilibiliApi {
             }
         }
         return cookies;
+    }
+
+    /// Reads cookie pairs embedded in the query string of a legacy success URL.
+    ///
+    /// The values stay URL-encoded on purpose: this is exactly how Bilibili stores them
+    /// inside the cookie itself, so decoding would corrupt `SESSDATA`.
+    private static Map<String, String> parseCookiesFromQuery(String url) {
+        Map<String, String> cookies = new LinkedHashMap<>();
+        int question = url.indexOf('?');
+        if (question < 0) {
+            return cookies;
+        }
+
+        String query = url.substring(question + 1);
+        int fragment = query.indexOf('#');
+        if (fragment >= 0) {
+            query = query.substring(0, fragment);
+        }
+
+        for (String pair : query.split("&")) {
+            int equals = pair.indexOf('=');
+            if (equals <= 0) {
+                continue;
+            }
+            String name = pair.substring(0, equals);
+            if ("SESSDATA".equals(name) || "bili_jct".equals(name) || "DedeUserID".equals(name)) {
+                cookies.put(name, pair.substring(equals + 1));
+            }
+        }
+        return cookies;
+    }
+
+    /// Follows the login success URL and collects `Set-Cookie` headers from every hop.
+    ///
+    /// The redirects are followed manually because [NetworkUtils#resolveConnection] drops
+    /// the cookies set by intermediate responses, and the crossDomain ticket link relies on
+    /// exactly those headers.
+    private static void collectCookiesFromUrl(String url, Map<String, String> cookies) {
+        String current = url;
+        for (int redirect = 0; redirect < 8; redirect++) {
+            HttpURLConnection connection = null;
+            try {
+                connection = NetworkUtils.createHttpConnection(current);
+                connection.setRequestProperty("User-Agent", USER_AGENT);
+                connection.setRequestProperty("Referer", "https://passport.bilibili.com/");
+                connection.setRequestProperty("Origin", "https://www.bilibili.com");
+                connection.setRequestProperty("Accept", "text/html,application/json,*/*");
+                connection.setInstanceFollowRedirects(false);
+
+                // Carry over cookies set by the poll response (buvid3 and friends), because
+                // the crossDomain exchange validates the same browser session.
+                String cookieHeader = buildCookieHeader(cookies);
+                if (!cookieHeader.isEmpty()) {
+                    connection.setRequestProperty("Cookie", cookieHeader);
+                }
+
+                int code = connection.getResponseCode();
+                cookies.putAll(collectCookies(connection.getHeaderFields()));
+
+                @Nullable String location = connection.getHeaderField("Location");
+                if (code >= 300 && code < 400 && location != null && !location.isBlank()) {
+                    current = new URL(connection.getURL(), location).toString();
+                    continue;
+                }
+                return;
+            } catch (IOException e) {
+                // The caller reports a missing session cookie; the login itself succeeded.
+                return;
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }
+    }
+
+    /// Exchanges a crossDomain ticket for cookies on both passport hosts.
+    ///
+    /// Bilibili used `passport.biligame.com` for the game login and
+    /// `passport.bilibili.com` for the web login, and which host accepts the ticket has
+    /// changed before. Trying both costs one extra request only when the first fails.
+    private static void collectCookiesFromTicket(String successUrl, Map<String, String> cookies) {
+        Map<String, String> query = parseQuery(successUrl);
+        @Nullable String ticket = query.get("ticket");
+        if (ticket == null || ticket.isBlank()) {
+            return;
+        }
+
+        String gourl = query.getOrDefault("gourl", "https://www.bilibili.com");
+        for (String host : new String[]{"passport.biligame.com", "passport.bilibili.com"}) {
+            collectCookiesFromUrl("https://" + host + "/x/passport-login/web/crossDomain"
+                    + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8)
+                    + "&gourl=" + URLEncoder.encode(gourl, StandardCharsets.UTF_8), cookies);
+            if (cookies.containsKey("SESSDATA")) {
+                return;
+            }
+        }
+    }
+
+    /// Parses a query string into URL-decoded values.
+    private static Map<String, String> parseQuery(String url) {
+        Map<String, String> query = new LinkedHashMap<>();
+        int question = url.indexOf('?');
+        if (question < 0) {
+            return query;
+        }
+
+        String raw = url.substring(question + 1);
+        int fragment = raw.indexOf('#');
+        if (fragment >= 0) {
+            raw = raw.substring(0, fragment);
+        }
+
+        for (String pair : raw.split("&")) {
+            int equals = pair.indexOf('=');
+            if (equals <= 0) {
+                continue;
+            }
+            query.put(
+                    URLDecoder.decode(pair.substring(0, equals), StandardCharsets.UTF_8),
+                    URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8));
+        }
+        return query;
     }
 
     private BilibiliApi() {
