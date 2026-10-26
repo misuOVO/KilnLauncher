@@ -25,6 +25,7 @@ import javafx.geometry.Insets;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import org.jackhuang.hmcl.bilibili.BilibiliAccountManager;
 import org.jackhuang.hmcl.setting.*;
 import org.jackhuang.hmcl.terracotta.lobby.PublicRoomLobbyPage;
 import org.jackhuang.hmcl.terracotta.lobby.PublicRoomPublisher;
@@ -60,7 +61,7 @@ public class TerracottaPage extends DecoratorAnimatedPage implements DecoratorPa
 
     public TerracottaPage() {
         statusPage.setNodeSupplier(TerracottaControllerPage::new);
-        lobbyPage.setNodeSupplier(() -> new PublicRoomLobbyPage(this::showStatus));
+        lobbyPage.setNodeSupplier(() -> new PublicRoomLobbyPage(this::showStatus, this::showStatus));
         tab = new TabHeader(transitionPane, statusPage, lobbyPage);
         tab.select(statusPage);
 
@@ -75,7 +76,7 @@ public class TerracottaPage extends DecoratorAnimatedPage implements DecoratorPa
 
         AdvancedListBox sideBar = new AdvancedListBox()
                 .addNavigationDrawerTab(tab, statusPage, i18n("terracotta.status"), SVG.TUNE)
-                .addNavigationDrawerTab(tab, lobbyPage, i18n("terracotta.lobby"), SVG.PUBLIC);
+                .addNavigationDrawerTab(tab, lobbyPage, i18n("terracotta.lobby"), SVG.PUBLIC, this::openLobby);
         left.setTop(sideBar);
 
         AccountAdvancedListItem accountListItem = new AccountAdvancedListItem();
@@ -118,6 +119,19 @@ public class TerracottaPage extends DecoratorAnimatedPage implements DecoratorPa
     /// Switches to the multiplayer status tab after joining a lobby room.
     private void showStatus() {
         tab.select(statusPage);
+    }
+
+    /// Opens the room lobby, asking the user to bind a Bilibili account first.
+    ///
+    /// The lobby and the "publish to lobby" switch share the same requirement, so the
+    /// login dialog is the only way into the tab while no account is bound.
+    private void openLobby() {
+        if (BilibiliAccountManager.isLoggedIn()) {
+            tab.select(lobbyPage);
+            return;
+        }
+
+        Controllers.dialog(new BilibiliLoginPane(() -> tab.select(lobbyPage)));
     }
 
     @Override

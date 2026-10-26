@@ -45,6 +45,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.TextFlow;
 import org.jackhuang.hmcl.auth.Account;
 import org.jackhuang.hmcl.auth.microsoft.MicrosoftAccount;
+import org.jackhuang.hmcl.bilibili.BilibiliAccountManager;
 import org.jackhuang.hmcl.game.LauncherHelper;
 import org.jackhuang.hmcl.setting.Accounts;
 import org.jackhuang.hmcl.setting.GameDirectoryManager;
@@ -334,6 +335,14 @@ public class TerracottaControllerPage extends StackPane {
                     publicRoom.setSelected(PublicRoomPublisher.instance().isPublished(cs));
                     publicRoom.selectedProperty().addListener((observable, oldValue, selected) -> {
                         if (selected) {
+                            // Publishing is part of the room lobby feature, so it needs the
+                            // same Bilibili binding as browsing the lobby.
+                            if (!BilibiliAccountManager.isLoggedIn()) {
+                                publicRoom.setSelected(false);
+                                Controllers.dialog(new BilibiliLoginPane(() -> publicRoom.setSelected(true)));
+                                return;
+                            }
+
                             publicRoom.setDisable(true);
                             PublicRoomPublisher.instance().publish(createPublicRoom(hostOK), error -> {
                                 publicRoom.setDisable(false);

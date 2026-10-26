@@ -93,9 +93,14 @@ public class AdvancedListBox extends ScrollPane {
     }
 
     public AdvancedListBox addNavigationDrawerTab(TabHeader tabHeader, TabControl.Tab<?> tab, String title, SVG leftGraphic) {
+        return addNavigationDrawerTab(tabHeader, tab, title, leftGraphic, () -> tabHeader.select(tab));
+    }
+
+    public AdvancedListBox addNavigationDrawerTab(TabHeader tabHeader, TabControl.Tab<?> tab, String title,
+                                                  SVG leftGraphic, Runnable onAction) {
         AdvancedListItem item = createNavigationDrawerItem(title, leftGraphic);
         item.activeProperty().bind(tabHeader.getSelectionModel().selectedItemProperty().isEqualTo(tab));
-        item.setOnAction(e -> tabHeader.select(tab));
+        item.setOnAction(e -> onAction.run());
         return add(item);
     }
 

@@ -34,7 +34,10 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.util.Duration;
 import com.jfoenix.controls.JFXTextField;
+import org.jackhuang.hmcl.ui.construct.JFXHyperlink;
 import org.jackhuang.hmcl.auth.Account;
+import org.jackhuang.hmcl.bilibili.BilibiliAccount;
+import org.jackhuang.hmcl.bilibili.BilibiliAccountManager;
 import org.jackhuang.hmcl.setting.Accounts;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
@@ -107,6 +110,12 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
     /// Callback used to switch to the multiplayer status tab after joining.
     private final Runnable onJoined;
 
+    /// Callback used to switch to the multiplayer status tab after logging out.
+    private final Runnable onLoggedOut;
+
+    /// Shows which Bilibili account is currently bound to the lobby.
+    private final Label accountLabel = new Label();
+
     /// Container holding one row per public room.
     private final ComponentList roomList = new ComponentList();
 
@@ -131,8 +140,10 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
     /// Creates the lobby page.
     ///
     /// @param onJoined callback invoked after successfully joining a room
-    public PublicRoomLobbyPage(Runnable onJoined) {
+    /// @param onLoggedOut callback invoked after the Bilibili account was removed
+    public PublicRoomLobbyPage(Runnable onJoined, Runnable onLoggedOut) {
         this.onJoined = onJoined;
+        this.onLoggedOut = onLoggedOut;
         refreshTimer.setCycleCount(Timeline.INDEFINITE);
 
         VBox content = new VBox(10);
@@ -144,6 +155,14 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
         HintPane hint = new HintPane(MessageDialogPane.MessageType.INFO);
         hint.setText(i18n("terracotta.lobby.desc"));
         content.getChildren().add(hint);
+
+        accountLabel.getStyleClass().add("terracotta-hint");
+        JFXHyperlink logoutLink = new JFXHyperlink(i18n("bilibili.account.logout"));
+        logoutLink.setOnAction(event -> confirmLogout());
+        HBox accountRow = new HBox(8, accountLabel, logoutLink);
+        accountRow.setAlignment(Pos.CENTER_LEFT);
+        content.getChildren().add(accountRow);
+        updateAccountLabel();
 
         statusLabel.getStyleClass().add("terracotta-hint");
         statusLabel.setText(i18n("terracotta.lobby.loading"));
@@ -238,6 +257,14 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
     /// Concurrent requests are ignored. This method must be called on the
     /// JavaFX application thread.
     public void refresh() {
+        if (!BilibiliAccountManager.isLoggedIn()) {
+            loading = false;
+            lastRooms = null;
+            roomList.getContent().setAll();
+            statusLabel.setText(i18n("bilibili.login.required"));
+            return;
+        }
+
         if (loading) {
             return;
         }
@@ -544,9 +571,39 @@ public final class PublicRoomLobbyPage extends StackPane implements PageAware {
         }).setSignificance(Task.TaskSignificance.MINOR).start();
     }
 
+    /// Updates the account label to show the currently bound Bilibili user.
+    private void updateAccountLabel() {
+        @Nullable BilibiliAccount account = BilibiliAccountManager.account();
+        accountLabel.setText(account != null
+                ? i18n("bilibili.account.bound", account.name().isBlank()
+                ? i18n("bilibili.account.unnamed", account.mid())
+                : account.name())
+                : i18n("bilibili.login.required"));
+    }
+
+    /// Asks for confirmation before removing the bound Bilibili account.
+    private void confirmLogout() {
+        Controllers.confirm(
+                i18n("bilibili.account.logout.confirm"),
+                i18n("bilibili.account.logout"),
+                () -> {
+                    BilibiliAccountManager.logout();
+                    updateAccountLabel();
+                    onLoggedOut.run();
+                },
+                () -> {
+                });
+    }
+
     /// Starts the refresh loop when the tab becomes visible.
     @Override
     public void onPageShown() {
+        updateAccountLabel();
+        if (!BilibiliAccountManager.isLoggedIn()) {
+            refreshTimer.stop();
+            refresh();
+            return;
+        }
         refreshTimer.play();
         refresh();
     }

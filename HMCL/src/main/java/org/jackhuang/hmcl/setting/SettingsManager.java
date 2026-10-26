@@ -366,6 +366,11 @@ public final class SettingsManager {
         return Metadata.HMCL_LOCAL_HOME;
     }
 
+    /// Returns the current per-workspace private directory path.
+    public static Path localPrivateDirectory() {
+        return LOCAL_PRIVATE_DIRECTORY;
+    }
+
     /// Returns the current per-workspace settings path.
     public static Path settingsLocation() {
         return SETTINGS_LOCATION;

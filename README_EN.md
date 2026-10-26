@@ -29,6 +29,16 @@ When enabled, the invite code is encrypted with `PBKDF2WithHmacSHA256` + `AES/GC
 before it is published. The public topic never contains the plain code; guests must type the
 password before they can reveal the code, copy it, or join.
 
+### Bilibili sign-in
+
+The room lobby and "Publish to room lobby" require a bound Bilibili account. Clicking the
+lobby while signed out shows "Sign in with Bilibili"; scan the QR code with the Bilibili
+mobile app to continue.
+
+- Credentials are stored only in `.kilnlauncher/private/bilibili-account.json` on this computer.
+- The lobby header shows the bound account and offers a sign-out link.
+- The check runs locally and is meant as an identity binding, not as real access control.
+
 ### Mod dependencies
 
 Downloading a mod resolves its **required** dependencies, picks versions that match the
@@ -95,6 +105,7 @@ known working relay. Additional relays can be supplied with
 - The room lobby is a public topic: anyone who reads the messages can see what a room
   publishes. The room password keeps strangers out, but it cannot stop a targeted brute-force
   attack — use a reasonably long password.
+- Bilibili sign-in is validated by the client only, so a modified client can bypass it.
 
 ## Relationship to upstream
 

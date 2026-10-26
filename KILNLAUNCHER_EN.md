@@ -26,6 +26,18 @@ executable's file version and the window title.
 - The copy button on the right copies the invite code for sharing.
 - Refreshes every 15 seconds while visible; a manual refresh button is available.
 
+### Bilibili sign-in
+
+The room lobby and the publish switch require a bound Bilibili account:
+
+- Clicking "Room Lobby" while signed out shows the "Sign in with Bilibili" dialog.
+- Scan its QR code with the Bilibili mobile app and confirm on the phone.
+- Credentials are stored only in `.kilnlauncher/private/bilibili-account.json`.
+- The lobby header shows the bound account and a sign-out link. Signing out gates the lobby
+  and the publish switch again.
+
+> The check runs in the client, so it binds an identity but cannot stop a modified client.
+
 ### Publish switch
 
 Create a room under "Multiplayer" → "Status"; once it is started, a
