@@ -50,9 +50,10 @@ instance's `mods` folder.
 The mod / resource pack / shader pages can search **Modrinth**, **CurseForge**, or **both
 merged**. Merged mode queries both sites and removes duplicates by name.
 
-> CurseForge requires your own API key. Enter it under
-> "Settings → Download → CurseForge API Key", or bake it into a build with the
-> `CURSEFORGE_API_KEY` environment variable.
+> KilnLauncher release builds use the MCIM mirror by default, so players do not need a
+> CurseForge API key. If the mirror is unavailable, enter your own key under
+> "Settings → Download → CurseForge API Key" to use the official API. Self-built launchers
+> can set `CURSEFORGE_BASE_URL` for a mirror/proxy or `CURSEFORGE_API_KEY` to embed a key.
 
 ### Other changes
 
@@ -80,7 +81,8 @@ Optional environment variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `CURSEFORGE_API_KEY` | Embed a CurseForge API key so users do not have to enter one |
+| `CURSEFORGE_API_KEY` | Embed a key in private builds; release builds do not embed one |
+| `CURSEFORGE_BASE_URL` | Comma-separated mirror/proxy list (MCIM is the default; no API key is sent) |
 | `BUILD_NUMBER` / `VERSION_TYPE` | Control the version number (see `versionRoot` in `config/project.properties`) |
 
 ## Usage

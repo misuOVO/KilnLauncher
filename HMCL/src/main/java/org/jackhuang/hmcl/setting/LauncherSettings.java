@@ -540,8 +540,8 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// CurseForge API key typed by the user.
     ///
-    /// Official HMCL builds embed a key in the JAR manifest. A self-built launcher has none,
-    /// so CurseForge stays hidden until a key is entered here.
+    /// Blank keeps the key embedded at build time; a key entered here overrides it.
+    /// Self-built launchers without an embedded key stay hidden until one is entered.
     @SerializedName("curseForgeApiKey")
     private final StringProperty curseForgeApiKey = new SimpleStringProperty("");
 

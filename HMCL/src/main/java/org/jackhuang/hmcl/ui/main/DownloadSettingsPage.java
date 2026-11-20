@@ -27,10 +27,12 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.*;
+import org.jackhuang.hmcl.addon.repository.CurseForgeRemoteAddonRepository;
 import org.jackhuang.hmcl.setting.DownloadSource;
 import org.jackhuang.hmcl.setting.EnumCommonDirectory;
 import org.jackhuang.hmcl.setting.ProxyType;
 import org.jackhuang.hmcl.task.FetchTask;
+import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.WeakListenerHolder;
 import org.jackhuang.hmcl.ui.construct.*;
@@ -102,9 +104,18 @@ public class DownloadSettingsPage extends StackPane {
                 var curseForgeApiKeyPane = new LineButton();
                 curseForgeApiKeyPane.setTitle(i18n("settings.launcher.curseforge_api_key"));
                 curseForgeApiKeyPane.setSubtitle(i18n("settings.launcher.curseforge_api_key.desc"));
-                curseForgeApiKeyPane.setTrailingText(org.jackhuang.hmcl.addon.repository.CurseForgeRemoteAddonRepository.isAvailable()
-                        ? i18n("settings.launcher.curseforge_api_key.configured")
-                        : i18n("settings.launcher.curseforge_api_key.missing"));
+
+                Runnable updateCurseForgeKeyStatus = () -> {
+                    if (!CurseForgeRemoteAddonRepository.getApiKey().isEmpty()) {
+                        curseForgeApiKeyPane.setTrailingText(i18n("settings.launcher.curseforge_api_key.configured"));
+                    } else if (CurseForgeRemoteAddonRepository.isAvailable()) {
+                        curseForgeApiKeyPane.setTrailingText(i18n("settings.launcher.curseforge_api_key.mirror"));
+                    } else {
+                        curseForgeApiKeyPane.setTrailingText(i18n("settings.launcher.curseforge_api_key.missing"));
+                    }
+                };
+                updateCurseForgeKeyStatus.run();
+                settings().curseForgeApiKeyProperty().addListener((observable, oldValue, newValue) -> updateCurseForgeKeyStatus.run());
                 curseForgeApiKeyPane.setOnAction(event -> promptCurseForgeApiKey());
 
                 downloadSource.getContent().setAll(versionListSourcePane, downloadSourcePane,
@@ -364,14 +375,13 @@ public class DownloadSettingsPage extends StackPane {
         }
     }
 
-    /// Opens a dialog that lets the user paste a CurseForge API key.
+    /// Opens a dialog that lets the user paste their own CurseForge API key.
     ///
-    /// A self-built launcher has no embedded key, so CurseForge and the merged source stay
-    /// unavailable until a key is entered here. The key is stored in the launcher settings
-    /// and applied to the repository immediately.
+    /// A key switches metadata requests to the official API; leaving it blank keeps using
+    /// the configured mirror.
     private void promptCurseForgeApiKey() {
         String current = settings().curseForgeApiKeyProperty().get();
-        org.jackhuang.hmcl.ui.Controllers.prompt(
+        Controllers.prompt(
                 i18n("settings.launcher.curseforge_api_key"),
                 (value, handler) -> {
                     settings().curseForgeApiKeyProperty().set(value == null ? "" : value.trim());

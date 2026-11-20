@@ -222,16 +222,15 @@ Effective Terracotta node list: [...]
 | 选项 | 说明 |
 | --- | --- |
 | Modrinth | 只搜 Modrinth，开箱即用 |
-| CurseForge | 只搜 CurseForge，需要先配置 API Key |
-| 合并 | 两个站一起搜，按名称去重（配置 Key 后才出现） |
+| CurseForge | 只搜 CurseForge，默认走 MCIM 镜像 |
+| 合并 | 两个站一起搜，按名称去重 |
 
-为什么之前看不到下载源：官方 HMCL 在构建时会把 CurseForge API Key 写进 JAR，
-自行构建的版本没有 Key，CurseForge 会被判定为不可用，下载源下拉框也会整个隐藏。
-KilnLauncher 改成：
+KilnLauncher 发布版默认通过 MCIM 镜像访问 CurseForge，玩家不需要填写 Key。
+在「设置 → 下载 → CurseForge API Key」填入自己的 Key 可以改用官方源；
+镜像不可用时也可以换用其他镜像或自建代理。
 
-- 下载源**始终显示**，没有 Key 时选 CurseForge 会提示去哪里配置，然后自动切回 Modrinth；
-- 「设置 → 下载」新增 **CurseForge API Key**，填进去立刻生效，不用重启；
-- Key 配好之后，下拉框里会多出「合并」。
+`CURSEFORGE_BASE_URL` 支持逗号分隔的多个镜像/代理地址，程序会依次尝试。
+只有在访问官方 `api.curseforge.com` 时才会发送 Key，不会把 Key 交给镜像。
 
 合并模式按「slug + 名称」去重，
 避免同一个模组出现两次；因为两个站的分类 id 不通用，选了分类时只查 Modrinth。

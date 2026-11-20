@@ -77,8 +77,8 @@ public final class DownloadProviders {
         settings().fileDownloadSourceProperty().addListener(onChangeDownloadSource);
         onChangeDownloadSource.invalidated(null);
 
-        // Self-built launchers have no embedded CurseForge key, so the key typed in the
-        // settings must be applied to the add-on repository as soon as it changes.
+        // A key typed in the settings overrides the one embedded at build time; leaving the
+        // setting blank keeps the embedded key, since the settings file stores "" by default.
         InvalidationListener onChangeCurseForgeApiKey = observable ->
                 CurseForgeRemoteAddonRepository.setApiKey(settings().curseForgeApiKeyProperty().get());
         settings().curseForgeApiKeyProperty().addListener(onChangeCurseForgeApiKey);

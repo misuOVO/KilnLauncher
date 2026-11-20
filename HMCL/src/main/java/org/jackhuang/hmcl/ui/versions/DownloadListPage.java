@@ -69,6 +69,9 @@ import static org.jackhuang.hmcl.util.javafx.ExtendedProperties.selectedItemProp
 
 public class DownloadListPage extends Control implements DecoratorPage, VersionPage.GameInstanceLoadable {
     protected final ReadOnlyObjectWrapper<State> state = new ReadOnlyObjectWrapper<>();
+    /// Number of results requested per page; smaller pages render faster on slow mirrors.
+    private static final int SEARCH_PAGE_SIZE = 30;
+
     private final BooleanProperty loading = new SimpleBooleanProperty(false);
     private final BooleanProperty failed = new SimpleBooleanProperty(false);
     private final boolean versionSelection;
@@ -174,7 +177,7 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                         : "";
             }
         }).thenApplyAsync(
-                gameVersion -> repository.search(downloadProvider, gameVersion, category, pageOffset, 50, searchFilter, sort, RemoteAddonRepository.SortOrder.DESC)
+                gameVersion -> repository.search(downloadProvider, gameVersion, category, pageOffset, SEARCH_PAGE_SIZE, searchFilter, sort, RemoteAddonRepository.SortOrder.DESC)
         ).whenComplete(Schedulers.javafx(), (result, exception) -> {
             if (searchID != currentSearchID) {
                 return;

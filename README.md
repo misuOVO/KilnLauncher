@@ -43,9 +43,9 @@ KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/H
 模组 / 资源包 / 光影页面支持选择 **Modrinth**、**CurseForge** 或**合并搜索**。
 合并模式会同时查询两个站点并按名称去重。
 
-> CurseForge 需要自己的 API Key，
-> 在「设置 → 下载 → CurseForge API Key」填入即可，也可以构建时通过环境变量
-> `CURSEFORGE_API_KEY` 内置。
+> KilnLauncher 发布版默认通过 MCIM 镜像访问 CurseForge，玩家不需要填写 Key。
+> 如果镜像不可用，可以在「设置 → 下载 → CurseForge API Key」填入自己的 Key 改用官方源。
+> 自行构建时可以用 `CURSEFORGE_BASE_URL` 指定镜像/代理，或用 `CURSEFORGE_API_KEY` 内置 Key。
 
 ### 其他
 
@@ -72,7 +72,8 @@ KilnLauncher 是基于 [HMCL **3.16.4 正式版**](https://github.com/HMCL-dev/H
 
 | 变量 | 作用 |
 | --- | --- |
-| `CURSEFORGE_API_KEY` | 把 CurseForge API Key 编译进程序，用户端无需再填 |
+| `CURSEFORGE_API_KEY` | 私有构建可把 CurseForge API Key 编译进程序；正式版默认不内置 |
+| `CURSEFORGE_BASE_URL` | 逗号分隔的镜像/代理地址（默认使用 MCIM，此时不会发送 API Key） |
 | `BUILD_NUMBER` / `VERSION_TYPE` | 控制版本号（见 `config/project.properties` 的 `versionRoot`） |
 
 如果访问 GitHub 下载 Gradle 发行版失败，可以改用镜像下载同版本 Gradle 后执行同样的任务。

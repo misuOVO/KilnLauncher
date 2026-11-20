@@ -31,6 +31,7 @@ val versionRoot = System.getenv("VERSION_ROOT") ?: projectConfig.getProperty("ve
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
+val curseForgeBaseUrl = System.getenv("CURSEFORGE_BASE_URL") ?: ""
 
 val launcherExe = System.getenv("HMCL_LAUNCHER_EXE") ?: ""
 
@@ -161,6 +162,7 @@ val hmclProperties = buildList {
     add("hmcl.version.type" to versionType)
     add("hmcl.microsoft.auth.id" to microsoftAuthId)
     add("hmcl.curseforge.apikey" to curseForgeApiKey)
+    add("kiln.curseforge.baseUrl" to curseForgeBaseUrl)
     add("hmcl.authlib-injector.version" to libs.authlib.injector.get().version!!)
     add("hmcl.lwjgl-unsafe-agent.version" to libs.lwjgl.unsafe.agent.get().version!!)
 }

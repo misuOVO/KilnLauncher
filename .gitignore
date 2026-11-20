@@ -83,5 +83,6 @@ language-subtag-registry
 /dist/
 /dist-for-friends/
 /dist-for-friends-alt/
+/dist-mirror/
 /*.zip
 /run/

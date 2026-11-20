@@ -225,17 +225,16 @@ The "Download source" selector on the mods / resource packs / shaders pages offe
 | Option | Meaning |
 | --- | --- |
 | Modrinth | Only Modrinth, works out of the box |
-| CurseForge | Only CurseForge, needs an API key |
-| Merged | Both sites at once, deduplicated by name (only shown once a key is configured) |
+| CurseForge | Only CurseForge, the MCIM mirror is used by default |
+| Merged | Both sites at once, deduplicated by name |
 
-Why the selector used to be missing: official HMCL builds embed a CurseForge API key in the JAR.
-A self-built launcher has no key, so CurseForge is considered unavailable and the selector was
-hidden entirely. KilnLauncher instead:
+KilnLauncher release builds use the MCIM mirror by default, so players do not need a key.
+Entering your own key under "Settings → Download → CurseForge API Key" switches to the
+official API; if the mirror is down, you can also use another mirror or your own proxy.
 
-- always shows the selector; choosing CurseForge without a key explains where to configure it
-  and switches back to Modrinth;
-- adds a **CurseForge API Key** row under "Settings → Download" that takes effect immediately;
-- shows "Merged" in the selector once a key is configured.
+`CURSEFORGE_BASE_URL` accepts a comma-separated list of mirrors/proxies and the launcher
+tries them in order. The key is only sent to the official `api.curseforge.com`, never to a
+mirror.
 
 Merged mode deduplicates by
 "slug + title"; because category ids differ between the sites, a selected category searches

@@ -26,6 +26,7 @@ import org.jackhuang.hmcl.util.Immutable;
 import org.jackhuang.hmcl.util.MurmurHash2;
 import org.jackhuang.hmcl.util.Pair;
 import org.jackhuang.hmcl.util.StringUtils;
+import org.jackhuang.hmcl.util.gson.JsonUtils;
 import org.jackhuang.hmcl.util.io.HttpRequest;
 import org.jackhuang.hmcl.util.io.JarUtils;
 import org.jackhuang.hmcl.util.io.NetworkUtils;
@@ -33,7 +34,6 @@ import org.jackhuang.hmcl.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
@@ -41,6 +41,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -53,40 +58,177 @@ import static org.jackhuang.hmcl.util.logging.Logger.LOG;
 
 public final class CurseForgeRemoteAddonRepository implements RemoteAddonRepository {
 
-    private static final String PREFIX = "https://api.curseforge.com";
-    private static final Semaphore SEMAPHORE = new Semaphore(16);
+    /// The official CurseForge API origin.
+    private static final String OFFICIAL_PREFIX = "https://api.curseforge.com";
 
-    private static volatile String apiKey = System.getProperty("hmcl.curseforge.apikey", JarUtils.getAttribute("hmcl.curseforge.apikey", ""));
+    /// Public mirrors used when no user API key is configured.
+    ///
+    /// MCIM is currently the only public CurseForge metadata mirror that could be verified.
+    /// The list can be overridden with `CURSEFORGE_BASE_URL` at build time or with
+    /// `-Dkiln.curseforge.baseUrl=...` at runtime; multiple URLs may be separated by commas.
+    private static final List<String> DEFAULT_MIRRORS = List.of(
+            "https://mod.mcimirror.top/curseforge"
+    );
+
+    /// Mirrors or proxies configured through `kiln.curseforge.baseUrl`.
+    private static final List<String> CONFIGURED_MIRRORS = parseBaseUrls(
+            System.getProperty("kiln.curseforge.baseUrl",
+                    JarUtils.getAttribute("kiln.curseforge.baseUrl", "")));
+
+    /// The mirrors to try when no user key is available.
+    private static final List<String> MIRRORS = CONFIGURED_MIRRORS.isEmpty()
+            ? DEFAULT_MIRRORS
+            : CONFIGURED_MIRRORS;
+
+    /// The key bundled at build time through `hmcl.curseforge.apikey`, empty in release builds.
+    private static final String DEFAULT_API_KEY =
+            System.getProperty("hmcl.curseforge.apikey", JarUtils.getAttribute("hmcl.curseforge.apikey", "")).trim();
+
+    private static volatile String apiKey = DEFAULT_API_KEY;
+
+    /// API bases to try, in order: the official API first when a key exists, then mirrors.
+    private static volatile List<String> baseUrls = computeBaseUrls(apiKey);
+
+    private static final Semaphore SEMAPHORE = new Semaphore(16);
 
     private static final int WORD_PERFECT_MATCH_WEIGHT = 5;
 
+    /// CurseForge rejects searches whose `index` is greater than this value.
+    private static final int MAX_SEARCH_INDEX = 10_000;
+
+    /// Short-lived cache for successful GET responses, in milliseconds.
+    private static final long RESPONSE_CACHE_TTL_MS = 60_000;
+
+    /// Maximum number of cached responses; the cache is cleared when it grows beyond this.
+    private static final int RESPONSE_CACHE_MAX_ENTRIES = 128;
+
+    private static final Map<String, CachedResponse> RESPONSE_CACHE = new ConcurrentHashMap<>();
+
+    private record CachedResponse(String json, long expiresAt) {
+    }
+
+    /// Files are loaded in small pages and fetched in parallel; one huge request is very slow.
+    private static final int FILE_PAGE_SIZE = 200;
+
+    /// Upper bound on pages fetched for a single mod, protecting the mirror from excessive requests.
+    private static final int MAX_FILE_PAGES = 50;
+
+    private static final ExecutorService FILE_LOADER = Executors.newFixedThreadPool(8, runnable -> {
+        Thread thread = new Thread(runnable, "CurseForgeFileLoader");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /// Removes trailing slashes so paths can be appended safely.
+    private static String normalizeBaseUrl(String url) {
+        String trimmed = url.trim();
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    /// Parses a comma, semicolon, or whitespace separated list of API base URLs.
+    private static List<String> parseBaseUrls(String value) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (String part : value.split("[,;\\s]+")) {
+            String normalized = normalizeBaseUrl(part);
+            if (!normalized.isEmpty()) {
+                result.add(normalized);
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /// Picks the candidate bases: the official API when a key exists, then the mirrors.
+    private static List<String> computeBaseUrls(@Nullable String key) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        if (key != null && !key.isEmpty()) {
+            result.add(OFFICIAL_PREFIX);
+        }
+        result.addAll(MIRRORS);
+        return List.copyOf(result);
+    }
+
     private static <R extends HttpRequest> R withApiKey(R request) {
+        // CurseForge responses are large; gzip cuts transfer size by roughly 5-6x.
+        request.header("Accept-Encoding", "gzip");
+
+        // Mirrors and third-party proxies must never receive the user's API key.
         String key = apiKey;
-        if (request.getUrl().startsWith(PREFIX) && !key.isEmpty()) {
+        if (!key.isEmpty() && request.getUrl().startsWith(OFFICIAL_PREFIX)) {
             request.header("X-API-KEY", key);
         }
         return request;
     }
 
-    /// Replaces the CurseForge API key at runtime.
-    ///
-    /// Official HMCL builds embed a key in the JAR manifest, but a self-built launcher has
-    /// none, which silently hides CurseForge and the download source selector. The launcher
-    /// therefore lets users paste their own key in the settings.
-    ///
-    /// @param key the key typed by the user, `null` or blank to disable CurseForge
-    public static void setApiKey(@Nullable String key) {
-        apiKey = key == null ? "" : key.trim();
+    /// Executes a GET request against the first base URL that responds successfully.
+    private static <T> T getJson(String path, @Nullable Map<String, String> query, TypeToken<T> type) throws IOException {
+        IOException failure = null;
+        for (String base : baseUrls) {
+            String url = base + path;
+            if (query != null && !query.isEmpty()) {
+                url = NetworkUtils.withQuery(url, query);
+            }
+            long now = System.currentTimeMillis();
+            CachedResponse cached = RESPONSE_CACHE.get(url);
+            if (cached != null && cached.expiresAt() > now) {
+                try {
+                    return JsonUtils.fromNonNullJson(cached.json(), type);
+                } catch (RuntimeException e) {
+                    RESPONSE_CACHE.remove(url);
+                }
+            }
+
+            try {
+                String json = withApiKey(HttpRequest.GET(url)).getString();
+                if (RESPONSE_CACHE.size() >= RESPONSE_CACHE_MAX_ENTRIES) {
+                    RESPONSE_CACHE.clear();
+                }
+                RESPONSE_CACHE.put(url, new CachedResponse(json, now + RESPONSE_CACHE_TTL_MS));
+                return JsonUtils.fromNonNullJson(json, type);
+            } catch (IOException | RuntimeException e) {
+                LOG.warning("Failed to fetch " + url, e);
+                failure = e instanceof IOException io ? io : new IOException(e);
+            }
+        }
+        throw failure != null ? failure : new IOException("No CurseForge API base URL configured");
     }
 
-    /// Returns the currently active CurseForge API key, empty when CurseForge is disabled.
+    /// Executes a POST request against the first base URL that responds successfully.
+    private static <T> T postJson(String path, Object body, TypeToken<T> type) throws IOException {
+        IOException failure = null;
+        for (String base : baseUrls) {
+            String url = base + path;
+            try {
+                return withApiKey(HttpRequest.POST(url)).json(body).getJson(type);
+            } catch (IOException | RuntimeException e) {
+                LOG.warning("Failed to fetch " + url, e);
+                failure = e instanceof IOException io ? io : new IOException(e);
+            }
+        }
+        throw failure != null ? failure : new IOException("No CurseForge API base URL configured");
+    }
+
+    /// Replaces the CurseForge API key at runtime.
+    ///
+    /// A non-blank key switches requests to the official API, with mirrors as a fallback.
+    /// A blank key keeps using the mirrors, so users do not need a key to search CurseForge.
+    ///
+    /// @param key the key typed by the user, `null` or blank to use the mirrors
+    public static void setApiKey(@Nullable String key) {
+        apiKey = key == null || key.isBlank() ? DEFAULT_API_KEY : key.trim();
+        baseUrls = computeBaseUrls(apiKey);
+    }
+
+    /// Returns the currently active CurseForge API key, empty when only mirrors are used.
     public static String getApiKey() {
         return apiKey;
     }
 
-    /// Returns whether a CurseForge API key is configured.
+    /// Returns whether at least one CurseForge API base URL is available.
     public static boolean isAvailable() {
-        return !apiKey.isEmpty();
+        return !baseUrls.isEmpty();
     }
 
     private final Type type;
@@ -124,7 +266,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     }
 
     private int calculateTotalPages(Response<List<CurseAddon>> response, int pageSize) {
-        return (int) Math.ceil((double) Math.min(response.pagination.totalCount, 10000) / pageSize);
+        return (int) Math.ceil((double) Math.min(response.pagination.totalCount, MAX_SEARCH_INDEX) / pageSize);
     }
 
     @Override
@@ -145,37 +287,14 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
             query.put("searchFilter", searchFilter);
             query.put("sortField", Integer.toString(toModsSearchSortField(sortType)));
             query.put("sortOrder", toSortOrder(sortOrder));
-            query.put("index", Integer.toString(pageOffset * pageSize));
+            // CurseForge rejects index > 10000 with HTTP 400, which the mirror reports as 500.
+            query.put("index", Integer.toString(Math.min(pageOffset * pageSize, MAX_SEARCH_INDEX)));
             query.put("pageSize", Integer.toString(pageSize));
 
-            Response<List<CurseAddon>> response = null;
-
-            IOException exception = null;
-            List<URI> candidates = downloadProvider.injectURLWithCandidates(NetworkUtils.withQuery(PREFIX + "/v1/mods/search", query));
-            for (URI candidate : candidates) {
-                LOG.info("Fetching " + candidate);
-                try {
-                    response = withApiKey(HttpRequest.GET(candidate.toString()))
-                            .getJson(Response.typeOf(listTypeOf(CurseAddon.class)));
-                    if (searchFilter.isEmpty()) {
-                        return new SearchResult(response.data().stream().map(addon -> addon.toMod(type)), calculateTotalPages(response, pageSize));
-                    }
-                    break;
-                } catch (IOException e) {
-                    LOG.warning("Failed to search addons: " + candidate, e);
-                    if (candidates.size() == 1) {
-                        exception = e;
-                    } else {
-                        if (exception == null) {
-                            exception = new IOException("Failed to search addons");
-                        }
-                        exception.addSuppressed(e);
-                    }
-                }
-            }
-
-            if (response == null) {
-                throw exception != null ? exception : new IOException("No candidates found");
+            Response<List<CurseAddon>> response = getJson(
+                    "/v1/mods/search", query, Response.typeOf(listTypeOf(CurseAddon.class)));
+            if (searchFilter.isEmpty()) {
+                return new SearchResult(response.data().stream().map(addon -> addon.toMod(type)), calculateTotalPages(response, pageSize));
             }
 
             // https://github.com/HMCL-dev/HMCL/issues/1549
@@ -269,9 +388,10 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
 
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<FingerprintMatchesResult> response = withApiKey(HttpRequest.POST(PREFIX + "/v1/fingerprints/432"))
-                    .json(mapOf(pair("fingerprints", Collections.singletonList(hash))))
-                    .getJson(Response.typeOf(FingerprintMatchesResult.class));
+            Response<FingerprintMatchesResult> response = postJson(
+                    "/v1/fingerprints/432",
+                    mapOf(pair("fingerprints", Collections.singletonList(hash))),
+                    Response.typeOf(FingerprintMatchesResult.class));
 
             if (response.data().exactMatches() == null || response.data().exactMatches().isEmpty()) {
                 return Optional.empty();
@@ -287,8 +407,8 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public RemoteAddon getModById(DownloadProvider downloadProvider, String id) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<CurseAddon> response = withApiKey(HttpRequest.GET(PREFIX + "/v1/mods/" + id))
-                    .getJson(Response.typeOf(CurseAddon.class));
+            Response<CurseAddon> response = getJson(
+                    "/v1/mods/" + id, null, Response.typeOf(CurseAddon.class));
             return response.data.toMod(type);
         } finally {
             SEMAPHORE.release();
@@ -299,8 +419,9 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public RemoteAddon.File getModFile(String modId, String fileId) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<CurseAddon.LatestFile> response = withApiKey(HttpRequest.GET(String.format("%s/v1/mods/%s/files/%s", PREFIX, modId, fileId)))
-                    .getJson(Response.typeOf(CurseAddon.LatestFile.class));
+            Response<CurseAddon.LatestFile> response = getJson(
+                    String.format("/v1/mods/%s/files/%s", modId, fileId), null,
+                    Response.typeOf(CurseAddon.LatestFile.class));
             return response.data().toVersion().file();
         } finally {
             SEMAPHORE.release();
@@ -311,10 +432,44 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public Stream<RemoteAddon.Version> getRemoteVersionsById(DownloadProvider downloadProvider, String id) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<List<CurseAddon.LatestFile>> response = withApiKey(HttpRequest.GET(PREFIX + "/v1/mods/" + id + "/files",
-                    pair("pageSize", "10000")))
-                    .getJson(Response.typeOf(listTypeOf(CurseAddon.LatestFile.class)));
-            return response.data().stream().map(CurseAddon.LatestFile::toVersion);
+            var type = Response.typeOf(listTypeOf(CurseAddon.LatestFile.class));
+            Response<List<CurseAddon.LatestFile>> first = getJson(
+                    "/v1/mods/" + id + "/files",
+                    mapOf(pair("pageSize", Integer.toString(FILE_PAGE_SIZE)), pair("index", "0")),
+                    type);
+
+            List<CurseAddon.LatestFile> files = new ArrayList<>(first.data());
+            int total = first.pagination() != null ? first.pagination().totalCount() : files.size();
+            int pages = Math.min((int) Math.ceil((double) total / FILE_PAGE_SIZE), MAX_FILE_PAGES);
+
+            if (pages > 1) {
+                List<CompletableFuture<List<CurseAddon.LatestFile>>> futures = new ArrayList<>(pages - 1);
+                for (int page = 1; page < pages; page++) {
+                    int index = page * FILE_PAGE_SIZE;
+                    futures.add(CompletableFuture.supplyAsync(() -> {
+                        try {
+                            Response<List<CurseAddon.LatestFile>> response = getJson(
+                                    "/v1/mods/" + id + "/files",
+                                    mapOf(pair("pageSize", Integer.toString(FILE_PAGE_SIZE)),
+                                            pair("index", Integer.toString(index))),
+                                    type);
+                            return response.data();
+                        } catch (IOException e) {
+                            LOG.warning("Failed to load CurseForge files at index " + index, e);
+                            return List.of();
+                        }
+                    }, FILE_LOADER));
+                }
+                for (CompletableFuture<List<CurseAddon.LatestFile>> future : futures) {
+                    try {
+                        files.addAll(future.join());
+                    } catch (CompletionException e) {
+                        LOG.warning("Failed to join CurseForge files page", e);
+                    }
+                }
+            }
+
+            return files.stream().map(CurseAddon.LatestFile::toVersion);
         } finally {
             SEMAPHORE.release();
         }
@@ -324,8 +479,9 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public Stream<RemoteAddonRepository.Category> getCategories() throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<List<Category>> categories = withApiKey(HttpRequest.GET(PREFIX + "/v1/categories", pair("gameId", "432")))
-                    .getJson(Response.typeOf(listTypeOf(Category.class)));
+            Response<List<Category>> categories = getJson(
+                    "/v1/categories", mapOf(pair("gameId", "432")),
+                    Response.typeOf(listTypeOf(Category.class)));
             return reorganizeCategories(categories.data(), section).stream().map(Category::toCategory);
         } finally {
             SEMAPHORE.release();
